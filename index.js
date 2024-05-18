@@ -2,8 +2,10 @@ const  express = require('express')
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const cors = require('cors');
-
+require('dotenv').config();
 const app = express()
+const Razorpay = require('razorpay');
+const crypto = require('crypto');
 
 app.use(express.json()) ; 
 app.use(cors()); 
@@ -11,6 +13,31 @@ app.use(cors());
 
 
 const SECRET = 'jaishreeram' 
+
+const paymentSchema = new mongoose.Schema({
+  username: {
+    type: String,
+  },
+  price: {
+    type: Number,
+  },
+  status: {
+    type: String,
+    enum: ["FAILED", "SUCCESS", "ABONDONED"],
+  },
+  razorpay_order_id: {
+    type: String,
+  },
+  razorpay_payment_id: {
+    type: String,
+  },
+  razorpay_signature: {
+    type: String,
+  },
+  paidBy: {
+    type: String,
+  },
+});
 
 
 const userSchema = new mongoose.Schema({
@@ -30,6 +57,10 @@ const appointmentRequestSchema = new mongoose.Schema({
   time: String,
   date: String,
   price : Number ,
+  paid : {
+    type : Boolean ,
+    default : false
+  } ,
   status: {
       type: Boolean,
       default: false,
@@ -71,11 +102,19 @@ const applydoctorSchema = mongoose.Schema({
 
 
 const User = mongoose.model('User' , userSchema) ;
+const payments = mongoose.model("Payments", paymentSchema);
 const Admin = mongoose.model('Admin' , adminSchema) ;
 const Applydoctor = mongoose.model('Applydoctor' , applydoctorSchema)
 const AppointmentRequest = mongoose.model('AppointmentRequest', appointmentRequestSchema);
 
 mongoose.connect('mongodb+srv://harsh:Geetasingh%40098@cluster0.wifoeru.mongodb.net/?retryWrites=true&w=majority', { dbName: "myhealth" });
+
+
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_API_KEY,
+  key_secret: process.env.RAZORPAY_APT_SECRET,
+});
+
 
 const authenticateJwt = (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -153,6 +192,60 @@ const authenticateJwt = (req, res, next) => {
       res.status(403).json({ message: 'Invalid username or password'  });
     }
   });
+
+  app.post("/user/appointments/paymentVerification/:userEmail/:appointmentId", async (req, res) => {
+    try { 
+        const {userEmail , appointmentId} = req.params
+      const user = await User.findOne({ email : userEmail });
+      if (!user) {
+          return res.status(404).json({ error: 'Doctor not found' });
+      }
+
+      const appointmentRequest = await AppointmentRequest.findById(appointmentId);
+      if (!appointmentRequest) {
+          return res.status(404).json({ error: 'Appointment request not found' });
+      }
+
+     
+      appointmentRequest.paid = true;
+      await appointmentRequest.save();
+
+      if (!user.appointmentRequests.includes(appointmentRequest._id)) {
+          user.appointmentRequests.push(appointmentRequest._id);
+          await user.save();
+      }
+            res.status(200)
+
+    } catch (e) {
+      console.error(e);
+      res.status(500).json(e);
+    }
+  });
+
+  
+  app.get("/user/appointments/getkey", async (req, res) => {
+    console.log( process.env.RAZORPAY_API_KEY )
+    res.status(200).json({ key: process.env.RAZORPAY_API_KEY });
+  });
+  app.post("/user/appointments/checkout", async (req, res) => {
+    try {
+      const amount = Number(req.body.price) * 100; 
+      const options = {
+        amount, 
+        currency: "INR",
+      };
+      const order = await razorpay.orders.create(options);
+      console.log(order);
+      res.status(200).json({
+        success: true,
+        order,
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json(e);
+    }
+  });
+  
   
  
   app.post('/users/applydoctor', async (req,res)  => {
