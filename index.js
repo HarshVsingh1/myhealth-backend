@@ -79,6 +79,13 @@ const adminSchema = mongoose.Schema({
     
 })
 
+const superUser = mongoose.Schema({
+  username : String , 
+  email : String ,
+  password : String ,
+  
+})
+
 const applydoctorSchema = mongoose.Schema({
   firstName: String,
   lastName: String,
@@ -92,6 +99,10 @@ const applydoctorSchema = mongoose.Schema({
   timingfrom: String,
   timingto: String,
   password: String,
+  approved : {
+    type : Boolean ,
+    default : false
+  } ,
   appointmentRequests: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'AppointmentRequest'
@@ -104,6 +115,7 @@ const applydoctorSchema = mongoose.Schema({
 const User = mongoose.model('User' , userSchema) ;
 const payments = mongoose.model("Payments", paymentSchema);
 const Admin = mongoose.model('Admin' , adminSchema) ;
+const SuperUser = mongoose.model('SuperUser' , superUser) ;
 const Applydoctor = mongoose.model('Applydoctor' , applydoctorSchema)
 const AppointmentRequest = mongoose.model('AppointmentRequest', appointmentRequestSchema);
 
@@ -157,6 +169,37 @@ const authenticateJwt = (req, res, next) => {
 
   
   app.post('/admin/login', async (req, res) => {
+    const { email , password } = req.body;
+    const user = await Admin.findOne({ email});
+    console.log(user)
+    if (user && user.password == password) {
+      const token = jwt.sign({ email, role: 'user' }, SECRET, { expiresIn: '1h' });
+      res.json({ message: 'Logged in successfully', token ,  email : user.email });
+    } else {
+      res.status(403).json({ message: 'Invalid username or password'  });
+    }
+  });
+
+
+  app.post('/SuperUser/signup', async(req, res) => {
+    const { username, password , email } = req.body;
+    const admin = await SuperUser.findOne({email})
+      if (admin) {
+        res.status(403).json({ message: 'Admin already exists' });
+      } else {
+        const obj = { username: username, password: password  , email : email};
+        const newAdmin = new SuperUser(obj);
+        newAdmin.save();
+        const token = jwt.sign({ username, role: 'admin' }, SECRET, { expiresIn: '1h' });
+        res.json({ message: 'SuperUser created successfully', token });
+      }
+  
+    
+  });
+  
+
+  
+  app.post('/SuperUser/login', async (req, res) => {
     const { email , password } = req.body;
     const user = await Admin.findOne({ email});
     console.log(user)
@@ -265,7 +308,16 @@ const authenticateJwt = (req, res, next) => {
   } ) 
 
   app.get('/doctors' , async (req,res) => {
-    const data = await Applydoctor.find() ;
+    const data = await Applydoctor.find({ approved: true }) ;
+    if(data){
+      res.status(200).json({doctors : data})
+    }else{
+      res.json({message  : "failed to fetch data from db"})
+    }
+  })
+
+  app.get('/doctors/application' , async (req,res) => {
+    const data = await Applydoctor.find({ approved: false }) ;
     if(data){
       res.status(200).json({doctors : data})
     }else{
@@ -274,6 +326,28 @@ const authenticateJwt = (req, res, next) => {
   })
 
 
+  app.patch('/doctor/approve', async (req, res) => {
+    try {
+      const { doctorId } = req.body;
+      if (!doctorId) {
+        return res.status(400).json({ message: "Doctor ID is required" });
+      }
+  
+      const updatedDoctor = await Applydoctor.findByIdAndUpdate(
+        doctorId,
+        { approved: true },
+        { new: true }
+      );
+  
+      if (!updatedDoctor) {
+        return res.status(404).json({ message: "Doctor not found" });
+      }
+  
+      res.status(200).json({ message: "Doctor approved successfully", doctor: updatedDoctor });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update doctor", error: error.message });
+    }
+  });
 
 
 
